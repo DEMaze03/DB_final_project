@@ -18,61 +18,40 @@
     <h2>Search Cards</h2>
     
     <input type="text" id="searchInput" placeholder="Type to search cards..." class="search-bar" />
+
+    
     
     <div class="filters">
+        <!-- Dropdown element -->
         <div class="filter-group">
             <label>Type</label>
-            <select id="filterType">
-                <option value="">All</option>
-                <option value="MINION">Minion</option>
-                <option value="SPELL">Spell</option>
-                <option value="WEAPON">Weapon</option>
-                <option value="HERO">Hero</option>
+            <select id="typeDropdown">
+                <option value="">-- Select an option --</option>
             </select>
         </div>
 
         <div class="filter-group">
             <label>Class</label>
-            <select id="filterClass">
-                <option value="">All</option>
-                <option value="DRUID">Druid</option>
-                <option value="HUNTER">Hunter</option>
-                <option value="MAGE">Mage</option>
-                <option value="PALADIN">Paladin</option>
-                <option value="PRIEST">Priest</option>
-                <option value="ROGUE">Rogue</option>
-                <option value="SHAMAN">Shaman</option>
-                <option value="WARLOCK">Warlock</option>
-                <option value="WARRIOR">Warrior</option>
-                <option value="NEUTRAL">Neutral</option>
+            <select id="classDropdown">
+                <option value="">-- Select an option --</option>
             </select>
         </div>
 
         <div class="filter-group">
             <label>Rarity</label>
-            <select id="filterRarity">
-                <option value="">All</option>
-                <option value="COMMON">Common</option>
-                <option value="RARE">Rare</option>
-                <option value="EPIC">Epic</option>
-                <option value="LEGENDARY">Legendary</option>
+            <select id="rarityDropdown">
+                <option value="">-- Select an option --</option>
             </select>
         </div>
 
         <div class="filter-group">
             <label>Mana</label>
-            <select id="filterMana">
-                <option value="">Any</option>
-                <option value="0">0</option>
-                <option value="1">1</option>
-                <option value="2">2</option>
-                <option value="3">3</option>
-                <option value="4">4</option>
-                <option value="5">5</option>
-                <option value="6">6</option>
-                <option value="7">7+</option>
+            <select id="costDropdown">
+                <option value="">-- Select an option --</option>
             </select>
         </div>
+        
+
     </div>
 
     <button class="btn btn-reset" onclick="resetEverything()">Clear All</button>
@@ -127,6 +106,6 @@
 
 </section>
 
-<script src="/script.js"></script>
+<script type="module" src="script.js"></script>
 </body>
 </html>
