@@ -7,7 +7,6 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Very small CORS helper for dev (adjust origin for production)
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", process.env.CORS_ORIGIN || "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -16,7 +15,6 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-// Example cards endpoint. Adjust the Cypher to match your graph model.
 app.get("/api/cards", async (req, res) => {
   const q = (req.query.q || "").trim();
   const type = (req.query.type || "").trim();
@@ -32,43 +30,37 @@ app.get("/api/cards", async (req, res) => {
     type: type,
     playerClass: playerClass,
     rarity: rarity,
-    cost: cost === "" ? null : parseInt(cost),
     set: set,
     race: race,
     mechanic: mechanic
   };
+  
+  // Handle cost separately - need to ensure type matching
+  if (cost !== "") {
+    params.cost = parseInt(cost);
+  }
 
-  // Build dynamic WHERE conditions
   const conditions = ["($q = '' OR toLower(c.name) CONTAINS $q)"];
   
   if (type) conditions.push("c.type = $type");
   if (playerClass) conditions.push("c.playerClass = $playerClass");
   if (rarity) conditions.push("c.rarity = $rarity");
-  if (cost !== "") conditions.push("c.cost = $cost");
+  if (cost !== "") conditions.push("toInteger(c.cost) = $cost");
   if (set) conditions.push("c.set = $set");
   if (race) conditions.push("c.race = $race");
 
-  let cypher = `
-    MATCH (c:Card)
-  `;
+  let cypher = `MATCH (c:Card)`;
 
-  // Add mechanic filter if specified
   if (mechanic) {
-    cypher += `
-    MATCH (c)-[:HAS_MECHANIC]->(m:Mechanic {name: $mechanic})
-    `;
+    cypher += ` MATCH (c)-[:HAS_MECHANIC]->(m:Mechanic {name: $mechanic})`;
   }
 
-  cypher += `
-    WHERE ${conditions.join(" AND ")}
-    RETURN c {.*} AS card
-  `;
+  cypher += ` WHERE ${conditions.join(" AND ")} RETURN c {.*} AS card`;
 
   try {
     const records = await runQuery(cypher, params);
     const cards = records.map((r) => {
       const card = r.get("card");
-      // Convert BigInt values to regular numbers
       return {
         ...card,
         cost: card.cost !== null && card.cost !== undefined ? Number(card.cost) : null,
@@ -85,7 +77,6 @@ app.get("/api/cards", async (req, res) => {
 });
 
 app.get("/api/params", async (req, res) => {
-  // Helper to convert Neo4j integers (BigInt) to regular numbers
   const toNumber = (val) => {
     if (val === null || val === undefined) return null;
     if (typeof val === 'bigint') return Number(val);
@@ -94,25 +85,33 @@ app.get("/api/params", async (req, res) => {
   };
 
   try {
-    // Get Card properties
     const cardCypher = `
       MATCH (c:Card)
-      RETURN 
-        collect(DISTINCT c.type) AS types,
-        collect(DISTINCT c.playerClass) AS playerClasses,
-        collect(DISTINCT c.rarity) AS rarities,
-        collect(DISTINCT c.cost) AS costs,
-        collect(DISTINCT c.set) AS sets,
-        collect(DISTINCT c.race) AS races
+      WHERE c.type IS NOT NULL
+      WITH collect(DISTINCT c.type) AS types
+      MATCH (c:Card)
+      WHERE c.playerClass IS NOT NULL
+      WITH types, collect(DISTINCT c.playerClass) AS playerClasses
+      MATCH (c:Card)
+      WHERE c.rarity IS NOT NULL
+      WITH types, playerClasses, collect(DISTINCT c.rarity) AS rarities
+      MATCH (c:Card)
+      WHERE c.cost IS NOT NULL
+      WITH types, playerClasses, rarities, collect(DISTINCT c.cost) AS costs
+      MATCH (c:Card)
+      WHERE c.set IS NOT NULL
+      WITH types, playerClasses, rarities, costs, collect(DISTINCT c.set) AS sets
+      MATCH (c:Card)
+      WHERE c.race IS NOT NULL
+      RETURN types, playerClasses, rarities, costs, sets, collect(DISTINCT c.race) AS races
     `;
     
     const cardRecords = await runQuery(cardCypher, {});
     const cardRecord = cardRecords[0];
 
-    // Get Mechanics separately - only from collectible cards
     const mechanicCypher = `
       MATCH (c:Card)-[:HAS_MECHANIC]->(m:Mechanic)
-      WHERE c.collectible = true OR c.collectible = 'true'
+      WHERE (c.collectible = true OR c.collectible = 'true') AND m.name IS NOT NULL
       RETURN collect(DISTINCT m.name) AS mechanics
     `;
     
@@ -120,16 +119,13 @@ app.get("/api/params", async (req, res) => {
     const mechanicRecord = mechanicRecords[0];
 
     const result = {
-      type: cardRecord.get("types").filter(v => v !== null && v !== '').sort(),
-      playerClass: cardRecord.get("playerClasses").filter(v => v !== null && v !== '').sort(),
-      rarity: cardRecord.get("rarities").filter(v => v !== null && v !== '').sort(),
-      cost: cardRecord.get("costs")
-        .filter(v => v !== null)
-        .map(toNumber)
-        .sort((a, b) => a - b),
-      set: cardRecord.get("sets").filter(v => v !== null && v !== '').sort(),
-      race: cardRecord.get("races").filter(v => v !== null && v !== '').sort(),
-      mechanic: mechanicRecord.get("mechanics").filter(v => v !== null && v !== '').sort()
+      type: cardRecord.get("types").sort(),
+      playerClass: cardRecord.get("playerClasses").sort(),
+      rarity: cardRecord.get("rarities").sort(),
+      cost: cardRecord.get("costs").map(toNumber).sort((a, b) => a - b),
+      set: cardRecord.get("sets").sort(),
+      race: cardRecord.get("races").sort(),
+      mechanic: mechanicRecord.get("mechanics").sort()
     };
 
     res.json({ success: true, data: result });
@@ -139,7 +135,6 @@ app.get("/api/params", async (req, res) => {
   }
 });
 
-// Health check
 app.get("/api/health", (req, res) => {
   res.json({ ok: true });
 });
@@ -148,7 +143,6 @@ const server = app.listen(PORT, () => {
   console.log(`API server listening on http://localhost:${PORT}`);
 });
 
-// Graceful shutdown
 const shutdown = async () => {
   console.log("Shutting down...");
   server.close(async () => {

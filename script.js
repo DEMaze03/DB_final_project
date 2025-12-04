@@ -1,19 +1,20 @@
 let currentPage = 1;
 let currentResults = [];
 let pageSize = 20;
-let collectibleCardsMap = new Map(); // Map of card name -> correct ID
+let collectibleCardsMap = new Map();
 
-// Load collectible cards mapping on startup
+const EXCLUDED_SETS = new Set(['HERO_SKINS']);
+const EXCLUDED_SET_PREFIXES = ['PLACEHOLDER_'];
+
 async function loadCollectibleCards() {
   try {
     const response = await fetch('/cards.collectible.json');
     const cards = await response.json();
-    
-    // Create a map of card name to ID for quick lookup
     cards.forEach(card => {
-      collectibleCardsMap.set(card.name.toLowerCase(), card.id);
+      if (card?.name && card?.id) {
+        collectibleCardsMap.set(card.name.toLowerCase(), card.id);
+      }
     });
-    
     console.log(`Loaded ${collectibleCardsMap.size} collectible cards`);
   } catch (err) {
     console.error('Error loading collectible cards:', err);
@@ -37,8 +38,12 @@ function populateDropdown(dropdownId, items) {
   const dropdown = document.getElementById(dropdownId);
   if (!dropdown || !Array.isArray(items)) return;
   
-  dropdown.length = 1;
-  items.forEach(item => {
+  // Remove all options except first
+  dropdown.options.length = 1;
+  
+  // Add unique items
+  const uniqueItems = [...new Set(items)].filter(item => item !== null && item !== undefined && item !== '');
+  uniqueItems.forEach(item => {
     const option = document.createElement("option");
     option.value = item;
     option.text = item;
@@ -55,7 +60,7 @@ async function queryGraph() {
   if (params.type) queryParams.append("type", params.type);
   if (params.class) queryParams.append("class", params.class);
   if (params.rarity) queryParams.append("rarity", params.rarity);
-  if (params.cost) queryParams.append("cost", params.cost);
+  if (params.cost !== "") queryParams.append("cost", params.cost);
   if (params.set) queryParams.append("set", params.set);
   if (params.race) queryParams.append("race", params.race);
   if (params.mechanic) queryParams.append("mechanic", params.mechanic);
@@ -63,7 +68,10 @@ async function queryGraph() {
   try {
     const res = await fetch(`${base}/api/cards?${queryParams.toString()}`);
     const payload = await res.json();
-    currentResults = payload.data || [];
+    const all = payload.data || [];
+    const filtered = all.filter(c => !isExcludedCard(c));
+    console.log(`API returned ${all.length} cards; after exclusion ${filtered.length} remain.`);
+    currentResults = filtered;
     currentPage = 1;
     displayCurrentPage();
   } catch (err) {
@@ -71,61 +79,76 @@ async function queryGraph() {
   }
 }
 
+function isExcludedCard(card) {
+  if (!card) return true;
+  const sets = Array.isArray(card.set) ? card.set : (card.set ? [card.set] : []);
+  for (const s of sets) {
+    if (!s) continue;
+    if (EXCLUDED_SETS.has(s)) return true;
+    if (EXCLUDED_SET_PREFIXES.some(p => s.startsWith(p))) return true;
+  }
+  const idCandidates = [card.id, card.cardId, card.dbfId];
+  for (const id of idCandidates) {
+    if (!id) continue;
+    const idStr = String(id).toUpperCase();
+    if (idStr.startsWith('HERO_') || idStr.startsWith('HERO-')) return true;
+  }
+  return false;
+}
+
 function displayCurrentPage() {
   const start = (currentPage - 1) * pageSize;
   const end = start + pageSize;
   const pageCards = currentResults.slice(start, end);
   displayResults(pageCards);
-  updatePagination();
+  updatePagination(currentResults.length);
 }
 
-function updatePagination() {
+function updatePagination(totalResults) {
   const pagination = document.getElementById("pagination");
   const resultsLabel = document.getElementById("resultsLabel");
   const prevBtn = document.getElementById("prevBtn");
   const nextBtn = document.getElementById("nextBtn");
   const pageInfo = document.getElementById("pageInfo");
   
-  if (currentResults.length === 0) {
+  if (!totalResults) {
     pagination.style.display = "none";
     resultsLabel.style.display = "none";
     return;
   }
   
-  const totalPages = Math.ceil(currentResults.length / pageSize);
+  const totalPages = Math.ceil(totalResults / pageSize);
   pagination.style.display = "flex";
   resultsLabel.style.display = "block";
-  resultsLabel.textContent = `${currentResults.length} cards found`;
+  resultsLabel.textContent = `${totalResults} cards found`;
   prevBtn.disabled = currentPage === 1;
   nextBtn.disabled = currentPage === totalPages;
   pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;
 }
 
 function getCardImageUrl(card) {
-  // Try to get the correct ID from collectible cards map
+  const cardIdFromRecord = card.id || card.cardId || card.dbfId;
+  if (cardIdFromRecord) {
+    return `https://art.hearthstonejson.com/v1/render/latest/enUS/256x/${cardIdFromRecord}.png`;
+  }
   const correctId = collectibleCardsMap.get(card.name?.toLowerCase());
-  const cardId = correctId || card.cardId;
-  
-  if (!cardId) return null;
-  
-  return `https://art.hearthstonejson.com/v1/render/latest/enUS/256x/${cardId}.png`;
+  if (correctId) {
+    return `https://art.hearthstonejson.com/v1/render/latest/enUS/256x/${correctId}.png`;
+  }
+  return null;
 }
 
 function displayResults(cards) {
   const resultsDiv = document.getElementById("searchResults");
-  
   if (!cards || cards.length === 0) {
     resultsDiv.innerHTML = '<div class="results-hint">No cards found</div>';
     return;
   }
-
+  
   resultsDiv.innerHTML = cards.map(card => {
     const cardData = JSON.stringify(card).replace(/"/g, '&quot;');
     const imageUrl = getCardImageUrl(card);
-    
-    // Skip cards without valid image URL
     if (!imageUrl) return '';
-    
     return `
       <div class="result-card" draggable="true" data-card="${cardData}">
         <img data-src="${imageUrl}" alt="${card.name || 'Card'}" class="result-card-image lazy">
@@ -138,8 +161,7 @@ function displayResults(cards) {
 
 function setupLazyLoading() {
   const images = document.querySelectorAll('img.lazy');
-  
-  const imageObserver = new IntersectionObserver((entries, observer) => {
+  const observer = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
       if (entry.isIntersecting) {
         const img = entry.target;
@@ -148,11 +170,8 @@ function setupLazyLoading() {
         observer.unobserve(img);
       }
     });
-  }, {
-    rootMargin: '50px'
-  });
-
-  images.forEach(img => imageObserver.observe(img));
+  }, { rootMargin: '50px' });
+  images.forEach(img => observer.observe(img));
 }
 
 async function fetchParams() {
@@ -167,12 +186,14 @@ async function fetchParams() {
 
 function resetEverything() {
   document.getElementById("searchInput").value = "";
-  ["typeDropdown", "classDropdown", "rarityDropdown", "costDropdown", "setDropdown", "raceDropdown", "mechanicDropdown"]
-    .forEach(id => document.getElementById(id).selectedIndex = 0);
-  
+  ["typeDropdown", "classDropdown", "rarityDropdown", "costDropdown", 
+   "setDropdown", "raceDropdown", "mechanicDropdown"].forEach(id => {
+    document.getElementById(id).selectedIndex = 0;
+  });
   currentResults = [];
   currentPage = 1;
-  document.getElementById("searchResults").innerHTML = '<div class="results-hint">Use search and filters to find cards</div>';
+  document.getElementById("searchResults").innerHTML = 
+    '<div class="results-hint">Use search and filters to find cards</div>';
   document.getElementById("pagination").style.display = "none";
   document.getElementById("resultsLabel").style.display = "none";
 }
@@ -183,7 +204,9 @@ function attachDragListeners() {
       e.currentTarget.classList.add('dragging');
       e.dataTransfer.setData('application/json', e.currentTarget.dataset.card);
     });
-    card.addEventListener('dragend', e => e.currentTarget.classList.remove('dragging'));
+    card.addEventListener('dragend', e => {
+      e.currentTarget.classList.remove('dragging');
+    });
   });
 }
 
@@ -194,7 +217,9 @@ function setupDropZones() {
       e.currentTarget.classList.add('drop-active');
     });
     zone.addEventListener('dragleave', e => {
-      if (e.currentTarget === e.target) e.currentTarget.classList.remove('drop-active');
+      if (e.currentTarget === e.target) {
+        e.currentTarget.classList.remove('drop-active');
+      }
     });
     zone.addEventListener('drop', e => {
       e.preventDefault();
@@ -207,24 +232,21 @@ function setupDropZones() {
 
 function populateCardSlot(slot, card) {
   document.querySelector(`#dropZone${slot} .slot-hint`).style.display = 'none';
-  document.getElementById(`cardContent${slot}`).style.display = 'block';
+  document.getElementById(`cardContent${slot}`).style.display = 'flex';
   document.getElementById(`removeCard${slot}`).style.display = 'block';
   
-  let infoHTML = `<p><strong>Name:</strong> ${card.name || 'Unknown'}</p>`;
-  if (card.type) infoHTML += `<p><strong>Type:</strong> ${card.type}</p>`;
-  if (card.playerClass) infoHTML += `<p><strong>Class:</strong> ${card.playerClass}</p>`;
-  if (card.cost !== null) infoHTML += `<p><strong>Mana:</strong> ${card.cost}</p>`;
-  if (card.attack !== null || card.health !== null) {
-    infoHTML += `<p><strong>Attack / Health:</strong> ${card.attack ?? '?'} / ${card.health ?? '?'}</p>`;
+  const imageUrl = getCardImageUrl(card);
+  if (!imageUrl) {
+    document.getElementById(`cardContent${slot}`).innerHTML = 
+      '<div class="results-hint">Image not available</div>';
+    window[`card${slot}`] = card;
+    return;
   }
-  if (card.durability !== null) infoHTML += `<p><strong>Durability:</strong> ${card.durability}</p>`;
-  if (card.rarity) infoHTML += `<p><strong>Rarity:</strong> ${card.rarity}</p>`;
-  if (card.race) infoHTML += `<p><strong>Race:</strong> ${card.race}</p>`;
-  if (card.mechanics?.length > 0) infoHTML += `<p><strong>Mechanics:</strong> ${card.mechanics.join(', ')}</p>`;
-  if (card.text) infoHTML += `<p><strong>Text:</strong> ${card.text.replace(/<[^>]*>/g, '')}</p>`;
-  if (card.set) infoHTML += `<p><strong>Set:</strong> ${card.set}</p>`;
   
-  document.getElementById(`cardInfo${slot}`).innerHTML = infoHTML;
+  const imgHtml = `<div class="card-image">
+    <img src="${imageUrl}" alt="${card.name || 'Card'}" class="selected-card-image" />
+  </div>`;
+  document.getElementById(`cardContent${slot}`).innerHTML = imgHtml;
   window[`card${slot}`] = card;
 }
 
@@ -232,17 +254,13 @@ function clearCardSlot(slot) {
   document.querySelector(`#dropZone${slot} .slot-hint`).style.display = 'block';
   document.getElementById(`cardContent${slot}`).style.display = 'none';
   document.getElementById(`removeCard${slot}`).style.display = 'none';
+  document.getElementById(`cardContent${slot}`).innerHTML = '';
   window[`card${slot}`] = null;
-  
-  if (!window.card1 && !window.card2) {
-    document.getElementById("interactionOutput").textContent = "Select two cards to see their interactions...";
-  }
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  // Load collectible cards mapping first
   await loadCollectibleCards();
-  
+
   const params = await fetchParams();
   if (params?.data) {
     if (params.data.type) populateDropdown("typeDropdown", params.data.type);
@@ -255,45 +273,35 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   document.getElementById("searchInput").addEventListener("input", queryGraph);
-  ["typeDropdown", "classDropdown", "rarityDropdown", "costDropdown", "setDropdown", "raceDropdown", "mechanicDropdown"]
-    .forEach(id => document.getElementById(id).addEventListener("change", queryGraph));
-  
+  ["typeDropdown", "classDropdown", "rarityDropdown", "costDropdown", 
+   "setDropdown", "raceDropdown", "mechanicDropdown"].forEach(id => {
+    document.getElementById(id).addEventListener("change", queryGraph);
+  });
+
   document.getElementById("clearAllBtn").addEventListener("click", resetEverything);
   document.getElementById("removeCard1").addEventListener("click", () => clearCardSlot(1));
   document.getElementById("removeCard2").addEventListener("click", () => clearCardSlot(2));
-  
+
   document.getElementById("prevBtn").addEventListener("click", () => {
-    if (currentPage > 1) { currentPage--; displayCurrentPage(); }
+    if (currentPage > 1) {
+      currentPage--;
+      displayCurrentPage();
+    }
   });
+  
   document.getElementById("nextBtn").addEventListener("click", () => {
     const totalPages = Math.ceil(currentResults.length / pageSize);
-    if (currentPage < totalPages) { currentPage++; displayCurrentPage(); }
+    if (currentPage < totalPages) {
+      currentPage++;
+      displayCurrentPage();
+    }
   });
+  
   document.getElementById("pageSize").addEventListener("change", e => {
     pageSize = parseInt(e.target.value);
     currentPage = 1;
     displayCurrentPage();
   });
-  
+
   setupDropZones();
-  
-  document.getElementById("analyzeBtn").addEventListener("click", () => {
-    const card1 = window.card1;
-    const card2 = window.card2;
-    const output = document.getElementById("interactionOutput");
-    
-    if (!card1 || !card2) {
-      output.textContent = "Please select two cards to analyze.";
-      return;
-    }
-    
-    let analysis = `${card1.name} vs ${card2.name}\n\n`;
-    if (card1.attack !== null && card2.health !== null && card1.attack >= card2.health) {
-      analysis += `${card1.name} destroys ${card2.name}. `;
-    }
-    if (card2.attack !== null && card1.health !== null && card2.attack >= card1.health) {
-      analysis += `${card2.name} destroys ${card1.name}. `;
-    }
-    output.textContent = analysis;
-  });
 });
