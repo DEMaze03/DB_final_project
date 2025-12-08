@@ -258,6 +258,146 @@ function clearCardSlot(slot) {
   window[`card${slot}`] = null;
 }
 
+
+function analyzeInteraction() {
+  const card1 = window.card1;
+  const card2 = window.card2;
+  const outputDiv = document.getElementById("interactionOutput");
+
+  if (!card1 || !card2) {
+    outputDiv.innerHTML = '<p class="slot-hint">Please drag two cards into the Card 1 and Card 2 slots to compare.</p>';
+    return;
+  }
+
+  // Helper to get numbers
+  const getStat = (val) => Number(val ?? 0);
+
+  const c1 = {
+    name: card1.name,
+    type: card1.type?.toUpperCase() || "UNKNOWN",
+    atk: getStat(card1.attack),
+    hp: getStat(card1.health),
+    dur: getStat(card1.durability),
+    cost: getStat(card1.cost),
+    text: card1.text || ""
+  };
+
+  const c2 = {
+    name: card2.name,
+    type: card2.type?.toUpperCase() || "UNKNOWN",
+    atk: getStat(card2.attack),
+    hp: getStat(card2.health),
+    dur: getStat(card2.durability),
+    cost: getStat(card2.cost),
+    text: card2.text || ""
+  };
+
+  let html = `<div class="analysis-container">`;
+  
+  html += `<h3 class="analysis-title">Card Comparison: ${c1.name} vs ${c2.name}</h3>`;
+
+  if (c1.type === "MINION" && c2.type === "MINION") {
+     html += `<div class="analysis-section">
+                 <h4 class="section-header combat-sim-header">Minion Combat Simulation</h4>`;
+     
+     const c1Survives = c1.hp > c2.atk;
+     const c2Survives = c2.hp > c1.atk;
+     
+     if (!c2Survives && c1Survives) {
+         html += `<p class="combat-result win-text">
+                    <span class="emoji">🏆</span> <strong>${c1.name} wins!</strong>
+                    <br>It destroys ${c2.name} and survives with ${c1.hp - c2.atk} Health remaining.
+                  </p>`;
+     } else if (!c1Survives && c2Survives) {
+         html += `<p class="combat-result win-text">
+                    <span class="emoji">🏆</span> <strong>${c2.name} wins!</strong>
+                    <br>It destroys ${c1.name} and survives with ${c2.hp - c1.atk} Health remaining.
+                  </p>`;
+     } else if (!c1Survives && !c2Survives) {
+         html += `<p class="combat-result draw-text">
+                    <span class="emoji">💀</span> <strong>Mutually Assured Destruction</strong>
+                    <br>Both minions destroy each other.
+                  </p>`;
+     } else {
+         html += `<p class="combat-result draw-text">
+                    <span class="emoji">🤝</span> <strong>Stalemate</strong>
+                    <br>Neither minion has enough attack to destroy the other in one hit.
+                    <span class="stat-detail">(${c1.name}: ${c1.atk}/${c1.hp} vs ${c2.name}: ${c2.atk}/${c2.hp})</span>
+                  </p>`;
+     }
+     html += `</div>`;
+  } else if (c1.type === "WEAPON" || c2.type === "WEAPON") {
+      html += `<div class="analysis-section">
+                  <h4 class="section-header weapon-comp-header">Weapon Comparison</h4>`;
+      
+      const damagePot1 = c1.type === "WEAPON" ? c1.atk * c1.dur : 0; 
+      const damagePot2 = c2.type === "WEAPON" ? c2.atk * c2.dur : 0;
+      
+      if (damagePot1 > damagePot2) {
+          html += `<p class="weapon-result win-text">
+                      <span class="emoji">⚔️</span> ${c1.name} offers more total damage potential (${damagePot1}) than ${c2.name} (${damagePot2}).
+                    </p>`;
+      } else if (damagePot2 > damagePot1) {
+          html += `<p class="weapon-result win-text">
+                      <span class="emoji">⚔️</span> ${c2.name} offers more total damage potential (${damagePot2}) than ${c1.name} (${damagePot1}).
+                    </p>`;
+      } else {
+          html += `<p class="weapon-result draw-text">
+                      <span class="emoji">⚖️</span> Total damage potential is similar (${damagePot1}).
+                    </p>`;
+      }
+      
+      if (c1.type === "MINION" || c2.type === "MINION") {
+          html += `<p class="note">(${c1.name} is a Minion, offering on-board presence, not Hero attack damage.)</p>`;
+      }
+      html += `</div>`;
+  } else {
+      html += `<div class="analysis-section">
+                  <h4 class="section-header">General Interaction</h4>
+                  <p>Direct combat comparison is not applicable for these card types (Spells/Heroes/etc).</p>
+              </div>`;
+  }
+
+  html += `<div class="analysis-section">
+              <h4 class="section-header value-stats-header">Value Stats</h4>`;
+  if (c1.cost < c2.cost) {
+      html += `<p class="cost-stat">⚡ <strong>${c1.name}</strong> is cheaper (${c1.cost} vs ${c2.cost} Mana).</p>`;
+  } else if (c2.cost < c1.cost) {
+      html += `<p class="cost-stat">⚡ <strong>${c2.name}</strong> is cheaper (${c2.cost} vs ${c1.cost} Mana).</p>`;
+  } else {
+      html += `<p class="cost-stat">⚖️ Both cards cost ${c1.cost} Mana.</p>`;
+  }
+  html += `</div>`;
+  
+  
+  html += `<div class="analysis-section">
+              <h4 class="section-header key-effects-header">Key Effects</h4>`;
+  const keywords = ["Divine Shield", "Poisonous", "Rush", "Charge", "Taunt", "Lifesteal", "Windfury", "Battlecry", "Deathrattle"];
+  let keywordFound = false;
+
+  [c1, c2].forEach(c => {
+      const found = keywords.filter(k => c.text.toLowerCase().includes(k.toLowerCase()));
+      if (found.length > 0) {
+          keywordFound = true;
+          html += `<p class="keyword-list">
+                      <strong>${c.name}</strong> has: 
+                      ${found.map(k => `<span class="keyword">${k}</span>`).join(", ")}
+                      <span class="text-note">(May alter combat result)</span>
+                  </p>`;
+      }
+  });
+
+  if (!keywordFound) {
+      html += `<p class="keyword-list">No combat-altering keywords found.</p>`;
+  }
+
+  html += `</div>`;
+  
+  html += `</div>`;
+
+  outputDiv.innerHTML = html;
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   await loadCollectibleCards();
 
@@ -302,6 +442,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     currentPage = 1;
     displayCurrentPage();
   });
+
+  document.getElementById("analyzeBtn").addEventListener("click", analyzeInteraction);
 
   setupDropZones();
 });
